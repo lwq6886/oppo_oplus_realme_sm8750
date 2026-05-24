@@ -74,6 +74,11 @@ on:
         required: true
         type: boolean
         default: 'false'
+      game_net_opt:
+        description: '是否开启游戏专属网络优化(偏低延迟与流量优先级能力,兼顾耗电,不默认启用高功耗激进特性)'
+        required: true
+        type: boolean
+        default: 'false'
       adios_enable:
         description: '是否启用ADIOS IO调度器支持(提升IO读写性能)'
         required: true
@@ -461,6 +466,31 @@ jobs:
           echo "CONFIG_TCP_CONG_VEGAS=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_TCP_CONG_NV=y" >> ./common/arch/arm64/configs/gki_defconfig
 
+      - name: 启用游戏低延迟网络优化
+        if: inputs.game_net_opt
+        run: |
+          cd kernel_workspace
+          # 说明：这里提供的是更适合游戏场景的低延迟排队与流量优先级能力，不是直接增强射频信号
+          # 方案偏低功耗稳妥，不启用 busy-poll 等明显增加功耗的特性
+          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_SCH_FQ_CODEL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo 'CONFIG_DEFAULT_NET_SCH="fq_codel"' >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_DEFAULT_FQ_CODEL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # 提供包分类、优先级与 DSCP 标记能力，便于后续按游戏流量做专属优先级优化
+          echo "CONFIG_NET_SCH_PRIO=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_SCH_SFQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_SCH_INGRESS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_CLS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_CLS_U32=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_CLS_FW=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_CLS_ACT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_ACT_SKBEDIT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NETFILTER_XT_MATCH_DSCP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NETFILTER_XT_TARGET_DSCP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # 保持低功耗优先，不默认修改拥塞算法；如需更激进吞吐仍由 bbr_enable 单独控制
+          echo "CONFIG_TCP_CONG_CUBIC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_FASTOPEN=y" >> ./common/arch/arm64/configs/gki_defconfig
+
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
           if [[ "${{ github.event.inputs.bbr_enable }}" != "false" ]]; then
@@ -753,6 +783,7 @@ jobs:
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
           echo "IPset: ${{ github.event.inputs.better_net }}" >> ./ak3.log
           echo "CN Cell+WiFi Optimize: ${{ github.event.inputs.signal_optimize }}" >> ./ak3.log
+          echo "Game Net Optimize: ${{ github.event.inputs.game_net_opt }}" >> ./ak3.log
           echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
           echo "Droidspaces: ${{ github.event.inputs.droidspaces_enable }}" >> ./ak3.log
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
@@ -840,6 +871,7 @@ jobs:
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
           - 网络功能增强：${{ github.event.inputs.better_net }}
           - 中国境内蜂窝/Wi-Fi优化：${{ github.event.inputs.signal_optimize }}
+          - 游戏低延迟网络优化：${{ github.event.inputs.game_net_opt }}
           - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
           - Droidspaces 容器支持：${{ github.event.inputs.droidspaces_enable }}
           - ADIOS IO调度器支持：${{ github.event.inputs.adios_enable }}
