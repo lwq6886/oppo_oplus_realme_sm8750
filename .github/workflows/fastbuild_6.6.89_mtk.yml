@@ -11,6 +11,14 @@ env:
 on:
   workflow_dispatch:
     inputs:
+      preset_profile:
+        description: '一键综合预设(custom=手动自定义, balanced_cn_game=中国境内蜂窝/Wi-Fi+省电+游戏低延迟推荐组合)'
+        required: true
+        type: choice
+        default: 'custom'
+        options:
+          - 'custom'
+          - 'balanced_cn_game'
       ksu_type:
         description: 'KernelSU分支(ReSukiSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认ReSukiSU)'
         required: true
@@ -121,6 +129,12 @@ jobs:
     outputs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
+      preset_profile: ${{ steps.apply_preset.outputs.preset_profile }}
+      effective_signal_optimize: ${{ steps.apply_preset.outputs.signal_optimize }}
+      effective_game_net_opt: ${{ steps.apply_preset.outputs.game_net_opt }}
+      effective_better_net: ${{ steps.apply_preset.outputs.better_net }}
+      effective_bbr_enable: ${{ steps.apply_preset.outputs.bbr_enable }}
+      effective_baseband_board: ${{ steps.apply_preset.outputs.baseband_board }}
     permissions:
       actions: write
       contents: read
@@ -192,6 +206,30 @@ jobs:
             CCACHE_REAL_KEY=${{ env.CCACHE_KEY }}-none
           fi
           echo "CCACHE_REAL_KEY=$CCACHE_REAL_KEY" >> $GITHUB_ENV
+
+      - name: 应用综合预设
+        id: apply_preset
+        run: |
+          PRESET_PROFILE="${{ github.event.inputs.preset_profile }}"
+          SIGNAL_OPTIMIZE="${{ github.event.inputs.signal_optimize }}"
+          GAME_NET_OPT="${{ github.event.inputs.game_net_opt }}"
+          BETTER_NET="${{ github.event.inputs.better_net }}"
+          BBR_ENABLE="${{ github.event.inputs.bbr_enable }}"
+          BASEBAND_BOARD="${{ github.event.inputs.baseband_board }}"
+
+          if [[ "$PRESET_PROFILE" == "balanced_cn_game" ]]; then
+            SIGNAL_OPTIMIZE="true"
+            GAME_NET_OPT="true"
+            BETTER_NET="false"
+            BBR_ENABLE="false"
+          fi
+
+          echo "preset_profile=$PRESET_PROFILE" >> $GITHUB_OUTPUT
+          echo "signal_optimize=$SIGNAL_OPTIMIZE" >> $GITHUB_OUTPUT
+          echo "game_net_opt=$GAME_NET_OPT" >> $GITHUB_OUTPUT
+          echo "better_net=$BETTER_NET" >> $GITHUB_OUTPUT
+          echo "bbr_enable=$BBR_ENABLE" >> $GITHUB_OUTPUT
+          echo "baseband_board=$BASEBAND_BOARD" >> $GITHUB_OUTPUT
 
       - name: 载入当前版本内核的 ccache缓存
         uses: actions/cache@v5
@@ -413,7 +451,7 @@ jobs:
           echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
           
       - name: 启用网络功能增强优化配置
-        if: inputs.better_net
+        if: steps.apply_preset.outputs.better_net == 'true'
         run: |
           cd kernel_workspace
           #开启增强 Netfilter 防火墙扩展模块,支持基于地址类型的匹配规则,启用 IP 集合支持,提高防火墙规则灵活性,支持更复杂的流量过滤策略
@@ -447,7 +485,7 @@ jobs:
           patch -p1 -F 3 < config.patch || true
 
       - name: 启用弱网体验优化
-        if: inputs.signal_optimize
+        if: steps.apply_preset.outputs.signal_optimize == 'true'
         run: |
           cd kernel_workspace
           # 说明：这里优化的是中国境内蜂窝/Wi-Fi 场景下的排队、拥塞与连接建立体验，并不能直接增强基带/射频信号强度
@@ -467,7 +505,7 @@ jobs:
           echo "CONFIG_TCP_CONG_NV=y" >> ./common/arch/arm64/configs/gki_defconfig
 
       - name: 启用游戏低延迟网络优化
-        if: inputs.game_net_opt
+        if: steps.apply_preset.outputs.game_net_opt == 'true'
         run: |
           cd kernel_workspace
           # 说明：这里提供的是更适合游戏场景的低延迟排队与流量优先级能力，不是直接增强射频信号
@@ -493,7 +531,7 @@ jobs:
 
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
-          if [[ "${{ github.event.inputs.bbr_enable }}" != "false" ]]; then
+          if [[ "${{ steps.apply_preset.outputs.bbr_enable }}" != "false" ]]; then
             echo "正在添加BBR等拥塞控制算法..."
             cd kernel_workspace
             #开启TCP拥塞控制算法控制器（必需）
@@ -523,7 +561,7 @@ jobs:
             #直播推流、云游戏上行链路等需优先保证吞吐量而非延迟敏感的场景，提升弱网吞吐性能，对抗运营商 QoS 限速。但由于TCP Brutal 仅在应用程序
             #对每个 TCP 连接设置带宽参数之后才能正常工作，绝大部分安卓应用都不支持该操作，故请勿将 TCP Brutal 设置成默认拥塞控制算法。
             echo "CONFIG_TCP_CONG_BRUTAL=y" >> ./common/arch/arm64/configs/gki_defconfig
-            if [[ "${{ github.event.inputs.bbr_enable }}" == "default" ]]; then
+            if [[ "${{ steps.apply_preset.outputs.bbr_enable }}" == "default" ]]; then
               echo "正在将BBR设为默认拥塞控制算法..."
               echo "CONFIG_DEFAULT_TCP_CONG=bbr" >> ./common/arch/arm64/configs/gki_defconfig
             else
@@ -773,18 +811,19 @@ jobs:
           echo "Run ID: $GITHUB_RUN_ID" >> ./ak3.log
           echo "Commit: $GITHUB_SHA" >> ./ak3.log
           echo "Time: $TIME_NOW" >> ./ak3.log
+          echo "Preset Profile: ${{ steps.apply_preset.outputs.preset_profile }}" >> ./ak3.log
           echo "Kernel Ver: $FULL_VERSION" >> ./ak3.log
           echo "KSU Branch: ${KSU_TYPENAME}" >> ./ak3.log
           echo "KSU Ver: ${KSUVER}" >> ./ak3.log
-          echo "Baseband Board: ${{ github.event.inputs.baseband_board }}" >> ./ak3.log
+          echo "Baseband Board: ${{ steps.apply_preset.outputs.baseband_board }}" >> ./ak3.log
           echo "susfs: ${{ github.event.inputs.susfs_enable }}" >> ./ak3.log
           echo "KPM: ${{ github.event.inputs.kpm_enable }}" >> ./ak3.log
           echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
-          echo "IPset: ${{ github.event.inputs.better_net }}" >> ./ak3.log
-          echo "CN Cell+WiFi Optimize: ${{ github.event.inputs.signal_optimize }}" >> ./ak3.log
-          echo "Game Net Optimize: ${{ github.event.inputs.game_net_opt }}" >> ./ak3.log
-          echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
+          echo "IPset: ${{ steps.apply_preset.outputs.better_net }}" >> ./ak3.log
+          echo "CN Cell+WiFi Optimize: ${{ steps.apply_preset.outputs.signal_optimize }}" >> ./ak3.log
+          echo "Game Net Optimize: ${{ steps.apply_preset.outputs.game_net_opt }}" >> ./ak3.log
+          echo "BBR&Brutal: ${{ steps.apply_preset.outputs.bbr_enable }}" >> ./ak3.log
           echo "Droidspaces: ${{ github.event.inputs.droidspaces_enable }}" >> ./ak3.log
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
@@ -863,16 +902,17 @@ jobs:
           - 内核版本号: ${{ env.FULL_VERSION }}
           - 编译时间: ${{ env.TIME_FORM }}
           - 机型：欧加真天玑9400+通用 ${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }} 内核（基于一加Ace5 Ultra ${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }} 版官方OKI源码）
-          - 基带板本：${{ github.event.inputs.baseband_board }}
+          - 综合预设：${{ needs.build.outputs.preset_profile }}
+          - 基带板本：${{ needs.build.outputs.effective_baseband_board }}
           - KSU分支：${{ env.KSU_TYPENAME }}
           - susfs支持：${{ github.event.inputs.susfs_enable }}
           - KPM支持 ：${{ github.event.inputs.kpm_enable }}
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
-          - 网络功能增强：${{ github.event.inputs.better_net }}
-          - 中国境内蜂窝/Wi-Fi优化：${{ github.event.inputs.signal_optimize }}
-          - 游戏低延迟网络优化：${{ github.event.inputs.game_net_opt }}
-          - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
+          - 网络功能增强：${{ needs.build.outputs.effective_better_net }}
+          - 中国境内蜂窝/Wi-Fi优化：${{ needs.build.outputs.effective_signal_optimize }}
+          - 游戏低延迟网络优化：${{ needs.build.outputs.effective_game_net_opt }}
+          - BBR/Brutal 等拥塞控制算法支持：${{ needs.build.outputs.effective_bbr_enable }}
           - Droidspaces 容器支持：${{ github.event.inputs.droidspaces_enable }}
           - ADIOS IO调度器支持：${{ github.event.inputs.adios_enable }}
           - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
