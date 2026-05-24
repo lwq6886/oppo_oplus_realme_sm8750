@@ -70,7 +70,7 @@ on:
         type: boolean
         default: 'false'
       signal_optimize:
-        description: '是否开启弱网/网络体验优化(非真实增强射频信号; 主要通过队列调度与 TCP 特性改善弱网体验)'
+        description: '是否开启中国境内蜂窝/Wi-Fi网络体验优化(非真实增强射频信号; 偏稳定性、抗抖动与弱网体验)'
         required: true
         type: boolean
         default: 'false'
@@ -440,7 +440,8 @@ jobs:
         if: inputs.signal_optimize
         run: |
           cd kernel_workspace
-          # 说明：这里优化的是弱网下的排队、拥塞与连接建立体验，并不能直接增强基带/射频信号强度
+          # 说明：这里优化的是中国境内蜂窝/Wi-Fi 场景下的排队、拥塞与连接建立体验，并不能直接增强基带/射频信号强度
+          # 策略偏稳定与兼容性，不默认启用更激进的 BBR；如需高吞吐可单独开启 bbr_enable
           # 开启高级拥塞控制与常用队列调度器，为 Wi-Fi/蜂窝弱网场景提供更好的缓冲控制能力
           echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -449,8 +450,11 @@ jobs:
           echo "CONFIG_DEFAULT_FQ_CODEL=y" >> ./common/arch/arm64/configs/gki_defconfig
           # 启用 TCP Fast Open，缩短部分连接场景的建连时延
           echo "CONFIG_TCP_FASTOPEN=y" >> ./common/arch/arm64/configs/gki_defconfig
-          # 保留安卓默认更稳妥的 CUBIC；若用户另行启用 BBR，则由 BBR 步骤决定默认算法
+          # 为蜂窝与 Wi-Fi 提供更适合无线丢包场景的备用拥塞控制算法，默认仍保持 CUBIC
           echo "CONFIG_TCP_CONG_CUBIC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_WESTWOOD=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_VEGAS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_NV=y" >> ./common/arch/arm64/configs/gki_defconfig
 
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
@@ -742,7 +746,7 @@ jobs:
           echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
           echo "IPset: ${{ github.event.inputs.better_net }}" >> ./ak3.log
-          echo "Signal Optimize: ${{ github.event.inputs.signal_optimize }}" >> ./ak3.log
+          echo "CN Cell+WiFi Optimize: ${{ github.event.inputs.signal_optimize }}" >> ./ak3.log
           echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
           echo "Droidspaces: ${{ github.event.inputs.droidspaces_enable }}" >> ./ak3.log
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
@@ -828,7 +832,7 @@ jobs:
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
           - 网络功能增强：${{ github.event.inputs.better_net }}
-          - 弱网体验优化：${{ github.event.inputs.signal_optimize }}
+          - 中国境内蜂窝/Wi-Fi优化：${{ github.event.inputs.signal_optimize }}
           - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
           - Droidspaces 容器支持：${{ github.event.inputs.droidspaces_enable }}
           - ADIOS IO调度器支持：${{ github.event.inputs.adios_enable }}
